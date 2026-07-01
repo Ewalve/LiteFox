@@ -1,0 +1,3 @@
+C:/Users/БИБОН/Desktop/LiteFox/build/CMakeFiles/LiteFox.dir
+C:/Users/БИБОН/Desktop/LiteFox/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/БИБОН/Desktop/LiteFox/build/CMakeFiles/ZERO_CHECK.dir

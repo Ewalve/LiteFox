@@ -1,0 +1,10 @@
+^C:\USERS\БИБОН\DESKTOP\LITEFOX\BUILD\CMAKEFILES\50E34F6BC81E4923DB5009D10D00FFDE\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/БИБОН/Desktop/LiteFox -BC:/Users/БИБОН/Desktop/LiteFox/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/БИБОН/Desktop/LiteFox/build/LiteFox.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

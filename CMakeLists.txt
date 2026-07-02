@@ -9,8 +9,11 @@ find_package(OpenSSL REQUIRED)
 
 add_executable(LiteFox src/main.cpp)
 
-add_compile_definitions(_WIN32_WINNT=0x0601)
-add_compile_options(/utf-8)
+if(MSVC)
+    add_compile_definitions(_WIN32_WINNT=0x0601)
+    add_compile_options(/utf-8)
+    target_compile_options(LiteFox PRIVATE /Zc:preprocessor)
+endif()
 target_include_directories(LiteFox PRIVATE 
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/headers"

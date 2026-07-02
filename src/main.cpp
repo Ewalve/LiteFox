@@ -111,33 +111,47 @@ int main(int, char**){
     
 
 
-
-
-    crow::App<crow::UTF8> https_app;
-
     boost::asio::io_context timer_io_context;
     std::unique_ptr<std::thread> timer_thread;
+
+    std::cout << "[LiteFox] Starting server..." << std::endl;
     if(is_production)
     {
-        http_app.port(80).multithreaded().run_async();
+        auto app_future = http_app.port(80).multithreaded().run_async();
+        std::cout << "[LiteFox] Http server running on port 80..." << std::endl;
+
+        crow::App<crow::UTF8> https_app;
         setupAnalyticsRoutes(https_app);
+        std::cout << "[LiteFox] routes are setup!" << std::endl;
 
         //загружаем SSL сертификаты
-        std::string cert_path = "./certs/fullchain.pem";
-        std::string key_path = "./certs/privkey.pem";
+        const char* domain_env = std::getenv("LITEFOX_DOMAIN");
+        if(domain_env == nullptr){
+            std::cerr << "[LiteFox] Ошибка: Переменная окружения LITEFOX_DOMAIN не установлена!" << std::endl;
+            return 1;
+        };
+
+        const char* workdir_env = std::getenv("APP_WORKDIR");
+        if(workdir_env == nullptr){
+            std::cerr << "[LiteFox] Ошибка: Переменная окружения APP_WORKDIR не установлена!" << std::endl;
+            return 1;
+        };
+
+        std::string cert_path = std::string(workdir_env) + "/certbot/conf/live/" + std::string(domain_env) + "/fullchain.pem";
+        std::string key_path = std::string(workdir_env) + "/certbot/conf/live/" + std::string(domain_env) + "/privkey.pem";
         https_app.ssl_file(cert_path, key_path);
+    
+        std::cout << "[LiteFox] certs are setup!" << std::endl;
 
         auto timer = std::make_shared<boost::asio::steady_timer>(timer_io_context);
         startCertUpdateTimer(https_app, timer);
 
         std::cout << "[LiteFox] Production HTTPS Server running on port 443..." << std::endl;
-
         https_app.port(443).multithreaded().run();
     }
     else{
+        std::cout << "[LiteFox] Development HTTP Server running on port 8080..." << std::endl;
         setupAnalyticsRoutes(http_app);
         http_app.port(8080).multithreaded().run();
-
-        std::cout << "[LiteFox] Development HTTP Server running on port 8080..." << std::endl;
     }
 }

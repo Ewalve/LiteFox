@@ -1,5 +1,3 @@
-version: '3.8'
-
 networks:
   litefox_network:
     driver: bridge
@@ -16,10 +14,11 @@ services:
     environment:
       - APP_DOMAIN=${LITEFOX_DOMAIN}
       - IS_PRODUCTION=${IS_PRODUCTION}
+      - LITEFOX_DOMAIN=${LITEFOX_DOMAIN}
+      - APP_WORKDIR=${APP_WORKDIR}
     volumes:
-      - ./certbot/conf/live/${LITEFOX_DOMAIN}/fullchain.pem:/app/certs/fullchain.pem:ro
-      - ./certbot/conf/live/${LITEFOX_DOMAIN}/privkey.pem:/app/certs/privkey.pem:ro
-      - ./certbot/www:/app/www/certbot:ro
+      - ./certbot/conf:/app/certbot/conf:ro
+      - ./certbot/www:/app/certbot/www:ro
     networks:
       - litefox_network
     restart: always

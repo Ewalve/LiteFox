@@ -22,5 +22,6 @@ FROM ubuntu:24.04
 
 WORKDIR /app
 
-COPY --from=builder /app/build/LiteFox . 
+COPY --from=builder /app/build/LiteFox .
+#COPY certs .
 CMD ["./LiteFox"]

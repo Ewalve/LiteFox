@@ -1,7 +1,38 @@
+version: '3.8'
+
+networks:
+  litefox_network:
+    driver: bridge
+
 services:
   litefox-app:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
+      - "80:80"
+      - "443:443"
       - "8080:8080"
+    environment:
+      - APP_DOMAIN=${LITEFOX_DOMAIN}
+      - IS_PRODUCTION=${IS_PRODUCTION}
+    volumes:
+      - ./certbot/conf/live/${LITEFOX_DOMAIN}/fullchain.pem:/app/certs/fullchain.pem:ro
+      - ./certbot/conf/live/${LITEFOX_DOMAIN}/privkey.pem:/app/certs/privkey.pem:ro
+      - ./certbot/www:/app/www/certbot:ro
+    networks:
+      - litefox_network
+    restart: always
+
+  certbot_init:
+    profiles: [prod]
+    image: certbot/certbot
+    entrypoint: >
+      /bin/sh -c "certbot certonly --webroot -w /var/www/certbot 
+      -d ${LITEFOX_DOMAIN} -d www.${LITEFOX_DOMAIN} --email ${LITEFOX_EMAIL} 
+      --agree-tos --no-eff-email --keep-until-expiring"
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    networks:
+      - litefox_network

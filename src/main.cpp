@@ -8,6 +8,7 @@
 #include <openssl/x509.h>
 #include <openssl/asn1.h>
 #include <openssl/bio.h>
+#include <functional>
 #include <chrono>
 
 #include <boost/asio.hpp>
@@ -118,7 +119,6 @@ int main(int, char**){
     std::string is_prod_str = (prod_env != nullptr) ? prod_env : "false";
     bool is_production = (is_prod_str == "true" || is_prod_str == "1");
 
-
     // HTTP маршруты
     CROW_ROUTE(http_app, "/.well-known/acme-challenge/<string>")
     ([](const crow::request& req, crow::response& res, std::string token){
@@ -128,24 +128,19 @@ int main(int, char**){
     });
 
     if(is_production){
-        // Роут для обычного редиректа всех остальных страниц
-        CROW_ROUTE(http_app, "/<path>")
-        ([](const crow::request& req, crow::response& res, std::string path){
+        CROW_CATCHALL_ROUTE(http_app)([](const crow::request& req, crow::response& res){
             std::string host = req.get_header_value("Host");
-
             const char* env_domain = std::getenv("APP_DOMAIN");
             std::string target_domain = (env_domain != nullptr) ? env_domain : "localhost";
 
-
-            if (host.rfind("www.", 0) == 0) {
-                host = host.substr(4); 
-            }
+            if (host.rfind("www.", 0) == 0) host = host.substr(4); 
             if (host.empty()) host = target_domain;
 
-
-            std::string https_url = "https://" + host + req.raw_url;
+            std::string https_url = "https://" + host + req.url;
+            
+            std::cout << "[LiteFox HTTP Redirect] Редирект на: " << https_url << std::endl;
             res.code = 301;
-            res.add_header("Location", https_url);
+            res.set_header("Location", https_url);
             res.end();
         });
     }

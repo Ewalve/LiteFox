@@ -7,68 +7,109 @@
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include <openssl/asn1.h>
+#include <openssl/bio.h>
 #include <chrono>
 
 #include <boost/asio.hpp>
+#include "headers/routes.hpp"
 
-void setupAnalyticsRoutes(crow::App<crow::UTF8>& app) {
-    CROW_ROUTE(app, "/litefox")
-    .methods("GET"_method)
-    ([]() {
-        crow::response res;
-        res.set_header("Content-Type", "text/html; charset=utf-8");
-        res.body = std::string("Hello from LiteFox! LiteFox Engine is running successfully! 🚀🦊");
-        return res;
-    });
+std::string formatAsn1Time(ASN1_TIME* time) {
+    if (!time) return "Unknown";
+    BIO* bio = BIO_new(BIO_s_mem());
+    if (!bio) return "Error allocating BIO memory";
+
+    ASN1_TIME_print(bio, time);
+    
+    char buffer[256];
+    int bytes_read = BIO_read(bio, buffer, sizeof(buffer) - 1);
+    BIO_free(bio);
+    
+    if (bytes_read <= 0) return "Error reading timestamp bytes";
+    buffer[bytes_read] = '\0';
+    
+    return std::string(buffer);
 }
-bool isCertificateExpiring(const std::string& cert_path, int days_threshold = 30) {
+ASN1_TIME* getDiskCertificateExpiry(const std::string& cert_path) {
     BIO* bio = BIO_new_file(cert_path.c_str(), "r");
-    if (!bio) {
-        std::cerr << "[LiteFox OpenSSL] Ошибка: Не удалось открыть файл " << cert_path << std::endl;
-        return true;
-    }
+    if (!bio) return nullptr;
 
     X509* cert = PEM_read_bio_X509(bio, nullptr, nullptr, nullptr);
     BIO_free(bio);
 
-    if (!cert) {
-        std::cerr << "[LiteFox OpenSSL] Ошибка: Не удалось распарсить X509 структуру" << std::endl;
-        return true;
+    if (!cert) return nullptr;
+
+    // ВАЖНО: делаем дубликат времени, так как сам cert мы сейчас удалим
+    ASN1_TIME* not_after = ASN1_STRING_dup(X509_getm_notAfter(cert));
+    X509_free(cert);
+    
+    return not_after;
+}
+bool checkAndReloadCertificate(SSL_CTX* ssl_ctx, const std::string& cert_path) {
+    if (!ssl_ctx) {
+        std::cerr << "[LiteFox OpenSSL ERROR] Нативный контекст равен nullptr!" << std::endl;
+        return false;
     }
 
-    ASN1_TIME* not_after = X509_getm_notAfter(cert);
-    
-    int days = 0;
-    int seconds = 0;
+    X509* mem_cert = SSL_CTX_get0_certificate(ssl_ctx);
+    if (!mem_cert) {
+        std::cerr << "[LiteFox OpenSSL ERROR] Не удалось получить сертификат из кучи!" << std::endl;
+        return false;
+    }
 
-    ASN1_TIME_diff(&days, &seconds, nullptr, not_after);
-    X509_free(cert);
-    std::cout << "[LiteFox OpenSSL] Сертификат " << cert_path << " будет валиден еще " << days << " дней." << std::endl;
-    return (days < days_threshold);
+    ASN1_TIME* mem_not_after = X509_getm_notAfter(mem_cert);
+    int days_left = 0;
+    int seconds_left = 0;
+    ASN1_TIME_diff(&days_left, &seconds_left, nullptr, mem_not_after);
+
+    std::cout << "[LiteFox OpenSSL] Активный сертификат в куче действует до: " 
+              << formatAsn1Time(mem_not_after) << " (осталось " << days_left << " дней)." << std::endl;
+
+    if (days_left >= 30) {
+        return false;
+    }
+
+    std::cout << "[LiteFox Timer] Сертификат в куче в зоне риска (< 30 дней). Проверяем диск..." << std::endl;
+
+    ASN1_TIME* disk_not_after = getDiskCertificateExpiry(cert_path);
+    if (!disk_not_after) {
+        std::cerr << "[LiteFox Timer ERROR] Не удалось прочитать сертификат с диска: " << cert_path << std::endl;
+        return false;
+    }
+
+    bool need_update = false;
+    if (ASN1_TIME_compare(disk_not_after, mem_not_after) > 0) {
+        std::cout << "[LiteFox Timer] На диске обнаружен БОЛЕЕ НОВЫЙ сертификат!" << std::endl;
+        need_update = true;
+    } else {
+        std::cout << "[LiteFox Timer] На диске тот же старый сертификат. Обновление не требуется." << std::endl;
+    }
+
+    ASN1_STRING_free(disk_not_after);
+    return need_update;
 }
-void startCertUpdateTimer(crow::App<crow::UTF8>& https_app, std::shared_ptr<boost::asio::steady_timer> timer) {
-    timer->expires_after(std::chrono::hours(24));
-    timer->async_wait([&https_app, timer](const crow::error_code& error) {
-        if (!error) {
-            std::string cert_path = "./certs/fullchain.pem";
-            std::string key_path = "./certs/privkey.pem";
+void checkAndReloadTick(crow::App<crow::UTF8>* https_app, 
+                         SSL_CTX* native_ctx, 
+                         std::string cert_path, 
+                         std::string key_path) {
+    std::cout << "[LiteFox Tick] Плановая проверка валидности сертификатов..." << std::endl;
 
-            std::cout << "[LiteFox Timer] Плановая проверка валидности сертификатов..." << std::endl;
+    if (!https_app || !native_ctx) {
+        std::cerr << "[LiteFox Tick ERROR] Критические объекты равны nullptr!" << std::endl;
+        return;
+    }
 
-            if (isCertificateExpiring(cert_path, 30)) {
-                std::cout << "[LiteFox Timer] Внимание: Сертификат истекает или обновился! Перезагружаем в память..." << std::endl;
-                try {
-                    https_app.ssl_file(cert_path, key_path);
-                    std::cout << "[LiteFox Timer] SSL-сертификаты успешно применены!" << std::endl;
-                } catch (const std::exception& e) {
-                    std::cerr << "[LiteFox Timer ERROR] Ошибка применения SSL: " << e.what() << std::endl;
-                }
-            } else {
-                std::cout << "[LiteFox Timer] Сертификат в порядке. Обновление памяти не требуется." << std::endl;
-            }
-            startCertUpdateTimer(https_app, timer);
+    // Передаем напрямую сохраненный рабочий указатель из кучи
+    if (checkAndReloadCertificate(native_ctx, cert_path)) {
+        std::cout << "[LiteFox Tick] Инициируем обновление кучи..." << std::endl;
+        try {
+            https_app->ssl_file(cert_path, key_path);
+            std::cout << "[LiteFox Tick] SSL-сертификаты успешно обновлены в куче!" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "[LiteFox Tick ERROR] Ошибка применения SSL: " << e.what() << std::endl;
         }
-    });
+    } else {
+        std::cout << "[LiteFox Tick] Проверка завершена. Обновление памяти не требуется." << std::endl;
+    }
 }
 int main(int, char**){
     crow::App<crow::UTF8> http_app;
@@ -108,11 +149,6 @@ int main(int, char**){
             res.end();
         });
     }
-    
-
-
-    boost::asio::io_context timer_io_context;
-    std::unique_ptr<std::thread> timer_thread;
 
     std::cout << "[LiteFox] Starting server..." << std::endl;
     if(is_production)
@@ -121,7 +157,7 @@ int main(int, char**){
         std::cout << "[LiteFox] Http server running on port 80..." << std::endl;
 
         crow::App<crow::UTF8> https_app;
-        setupAnalyticsRoutes(https_app);
+        routes_system::init_routes(https_app);
         std::cout << "[LiteFox] routes are setup!" << std::endl;
 
         //загружаем SSL сертификаты
@@ -139,19 +175,29 @@ int main(int, char**){
 
         std::string cert_path = std::string(workdir_env) + "/certbot/conf/live/" + std::string(domain_env) + "/fullchain.pem";
         std::string key_path = std::string(workdir_env) + "/certbot/conf/live/" + std::string(domain_env) + "/privkey.pem";
-        https_app.ssl_file(cert_path, key_path);
+
+        boost::asio::ssl::context ssl_ctx(boost::asio::ssl::context::tlsv12_server);
+        ssl_ctx.use_certificate_chain_file(cert_path);
+        ssl_ctx.use_private_key_file(key_path, boost::asio::ssl::context::pem);
+
+        SSL_CTX* stable_native_ctx = ssl_ctx.native_handle();
+        https_app.ssl(std::move(ssl_ctx));
+
+        https_app.tick(std::chrono::seconds(10), [&https_app, stable_native_ctx, cert_path, key_path]() {
+            checkAndReloadTick(&https_app, stable_native_ctx, cert_path, key_path);
+        });
     
         std::cout << "[LiteFox] certs are setup!" << std::endl;
 
-        auto timer = std::make_shared<boost::asio::steady_timer>(timer_io_context);
-        startCertUpdateTimer(https_app, timer);
+        // auto timer = std::make_shared<boost::asio::steady_timer>(timer_io_context);
+        // startCertUpdateTimer(https_app, timer);
 
         std::cout << "[LiteFox] Production HTTPS Server running on port 443..." << std::endl;
         https_app.port(443).multithreaded().run();
     }
     else{
         std::cout << "[LiteFox] Development HTTP Server running on port 8080..." << std::endl;
-        setupAnalyticsRoutes(http_app);
+        routes_system::init_routes(http_app);
         http_app.port(8080).multithreaded().run();
     }
 }

@@ -114,6 +114,7 @@ void checkAndReloadTick(crow::App<crow::UTF8>* https_app,
 }
 int main(int, char**){
     crow::App<crow::UTF8> http_app;
+    http_app.server_name("LiteFox");
 
     const char* prod_env = std::getenv("IS_PRODUCTION");
     std::string is_prod_str = (prod_env != nullptr) ? prod_env : "false";
@@ -152,6 +153,8 @@ int main(int, char**){
         std::cout << "[LiteFox] Http server running on port 80..." << std::endl;
 
         crow::App<crow::UTF8> https_app;
+        https_app.server_name("LiteFox");
+        
         routes_system::init_routes(https_app);
         std::cout << "[LiteFox] routes are setup!" << std::endl;
 

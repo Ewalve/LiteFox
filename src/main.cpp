@@ -120,10 +120,16 @@ int main(int, char**){
     std::string is_prod_str = (prod_env != nullptr) ? prod_env : "false";
     bool is_production = (is_prod_str == "true" || is_prod_str == "1");
 
+    const char* workdir_env = std::getenv("APP_WORKDIR");
+    if(workdir_env == nullptr){
+        std::cerr << "[LiteFox] Ошибка: Переменная окружения APP_WORKDIR не установлена!" << std::endl;
+        return 1;
+    };
+
     // HTTP маршруты
     CROW_ROUTE(http_app, "/.well-known/acme-challenge/<string>")
-    ([](const crow::request& req, crow::response& res, std::string token){
-        std::string file_path = "./www/certbot/.well-known/acme-challenge/" + token;
+    ([&workdir_env](const crow::request& req, crow::response& res, std::string token){
+        std::string file_path =  std::string(workdir_env) + "/www/certbot/.well-known/acme-challenge/" + token;
         res.set_static_file_info(file_path);
         res.end();
     });
@@ -162,12 +168,6 @@ int main(int, char**){
         const char* domain_env = std::getenv("LITEFOX_DOMAIN");
         if(domain_env == nullptr){
             std::cerr << "[LiteFox] Ошибка: Переменная окружения LITEFOX_DOMAIN не установлена!" << std::endl;
-            return 1;
-        };
-
-        const char* workdir_env = std::getenv("APP_WORKDIR");
-        if(workdir_env == nullptr){
-            std::cerr << "[LiteFox] Ошибка: Переменная окружения APP_WORKDIR не установлена!" << std::endl;
             return 1;
         };
 

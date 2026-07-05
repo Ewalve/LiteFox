@@ -37,3 +37,19 @@ services:
       - ./certbot/www/.well-known/acme-challenge:/var/www/certbot/.well-known/acme-challenge
     networks:
       - litefox_network
+    restart: on-failure
+
+  # Автоматическое продление сертификатов
+  certbot_renew:
+    profiles: [prod]
+    image: certbot/certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: /bin/sh -c
+    command: >
+      "certbot renew --quiet --webroot -w /var/www/certbot 
+      --post-hook 'echo \"[$(date)] Certificate renewed successfully\"'"
+    networks:
+      - litefox_network
+    restart: unless-stopped
